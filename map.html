@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        svg {
+            border-style: solid;
+            border-width: 1px;
+            border-color: black;
+
+        }
+    </style>
+
+    <script src="d3.js"></script>
+
+</head>
+
+<body>
+    <h1>Карта выборов 2018</h1>
+    <div>
+        <h2>УИК Санкт-Петербурга</h2>
+        <svg id = "Map"></svg>
+    </div>
+
+    <script>
+    
+    // Создаем хранилище для данных пока пустое
+    let store = {}
+
+    function loadData(){
+        return Promise.all([
+            d3.json("spm_mun_new_coll.geo.json"),
+        ]).then(datasets => {
+            store.geoJSON = datasets[0]
+            return store
+        })
+    }
+
+    function getMapConfig(){
+        let width = 800;
+        let height = 600;
+        let container = d3.select("#Map")
+            .attr("width", width)
+            .attr("height", height)
+        return {width, height, container}
+    }
+
+    function getMapProjection(config){
+        let {width, height} = config;
+        let projection = d3.geoMercator()
+        projection
+            .scale(25000)
+            .center([30.144192453421915, 59.947795163477309])
+            .translate([width / 2, height / 2 ])
+        store.MapProjection = projection;
+        return projection
+
+    }
+
+    function drawBaseMap(container, mun, projection){
+        let path = d3.geoPath()
+                     .projection(projection)
+        container.selectAll("path").data(mun)
+            .enter().append("path")
+            .attr("d", path)
+            .attr("stroke", "#ccc")
+            .attr("fill", "#eee")
+            .attr("opacity", 0.3)
+            
+    }
+
+    function drawMap(geoJeon) {
+        let config = getMapConfig();
+        let projection = getMapProjection(config)
+        drawBaseMap(config.container, geoJeon.features, projection)
+    }
+
+
+    function showData() {
+        drawMap(store.geoJSON)
+    }
+
+     loadData().then(showData);
+     console.log(store);
+
+    
+    
+    
+    </script>
+
+
+
+
+</body>
+
+</html>
