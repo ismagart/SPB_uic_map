@@ -158,13 +158,96 @@ cleaning_uic_table <- function(uic_dataframe){
                      house_liter = stringr::str_remove_all(house_liter, "((%)|(\\d))"),
                      street_name = stringr::str_remove_all(street_name, "(д\\.|дом|дом no)\\W*\\d.*|(т\\.)?\\d+-\\d+.*"))
   
-  clean_dt <- dplyr::mutate(clean_dt, house_number = stringr::str_remove_all(house_number, ","),
+  clean_dt <- dplyr::mutate(clean_dt, 
+                     house_number = stringr::str_remove_all(house_number, ","),
                      street_name = stringr::str_replace_all(street_name, "%%", " "))
   return(clean_dt)
 }
+
+# "Разворачивание" идентификаторов улиц
+street_identifer_dictinary <- list(list(c("бул\\.","б- р", "\\bбул\\b", "бульвар"), "бульвар"), 
+                                   list(c("ул\\.","\\bул\\b", "улица"), "улица"),
+                                   list(c("шос\\.", "шосс\\.", "ш\\.", "\\bшос\\b", "шоссе"), "шоссе"),
+                                   list(c("пр-т","пр\\." ), "проспект"),
+                                   list(c("кан\\.", "канал"), "канал"),
+                                   list("\\bр\\.", "реки"),
+                                   list(c("наб\\.", "набережная"), "набережная"),
+                                   list("квартал", "квартал"),
+                                   list("линия", "линия"),
+                                   list("пер\\.", "переулок"),
+                                   list("пл\\.", "площадь"),
+                                   list("площадь", "площадь"),
+                                   list("аллея", "аллея"),
+                                   list("\\bостров\\b", "остров"), 
+                                   list("\\bпроезд\\b", "проезд"),
+                                   list("\\bпо\\b", "почтовое отделение"), 
+                                   list("участок", "участок"),
+                                   list("переулок", "переулок"))
+
+suburb_identifer_dictionary <- list(list(c("\\bп\\.", "\bпос\\.", "\\bПос\\.", "поселок", "\\bпос\\b"), "посёлок"),
+                                    list("г\\.", "город"))
+
+# разворачиваем всякие сокращения в идентификаторах
+identifer_unfold <- function(input_data, dictionary_list_street, dictionary_list_suburb){
+  input_data$street_identifer <- NA
+  for (i in dictionary_list_street){
+    pattern <- paste0(i[[1]], collapse = "|")
+    position_street <- which(stringr::str_detect(input_data$street_name, pattern) == T)
+    input_data$street_name[position_street] <- stringr::str_replace(input_data$street_name[position_street], pattern, i[[2]])
+    # Отдельно записываем идентификатор, так как при сборке запроса в геокодер
+    # иногда приходится переставлять местами название и идентификатор
+    input_data$street_identifer[position_street] <- i[[2]]
+    # Убираемся после себя
+    space_pattern <- paste0("(\\b",i[[2]], "\\B|\\B", i[[2]], "\\b)")
+    input_data$street_name[position_street] <- stringr::str_remove_all(stringr::str_replace_all(input_data$street_name[position_street], space_pattern, " \\1 "),"^ | $")
+  }
+  # input_data$suburb_identifer <- NA
+  for (i in dictionary_list_suburb){
+    pattern <- paste0(i[[1]], collapse = "|")
+    position_suburb <- which(stringr::str_detect(input_data$suburb_name, pattern) == T)
+    # Удаляем этот идентификатор вообще
+    input_data$suburb_name[position_suburb] <- stringr::str_remove_all(input_data$suburb_name[position_suburb], pattern)
+    # убираемся, это всякие пустые места в начале
+    input_data$suburb_name[position_suburb] <- stringr::str_remove_all(input_data$suburb_name[position_suburb], "^[ ]*\\.*[ ]*")
+  }
+  return(input_data)
+}
+
+# Снова чистим
+cleaning_little_uic_table <- function(input_data){
+  # Удаляем префикс указателя что это дом/д. и т.д
+  # удаляем указание что это корпуc
+  # Удаляем указание что это это литера
+  # Удаляем всякие запятые, кавычки в строке улиц
+  input_data <- dplyr::mutate(input_data, 
+                              house_number = stringr::str_remove_all(house_number,"[^[:digit:]/]*"),
+                              house_corpus = stringr::str_remove_all(house_corpus, "[^[:digit:]/]*"),
+                              house_liter = stringr::str_to_upper(
+                                stringr::str_remove(house_liter,"(лит\\.|литера|литер|)\\W*[ ]?")),
+                              street_name = stringr::str_remove_all(street_name, "[^\\.\\w -]*|^[ ]*|\\W*$"),
+                              uic = stringr::str_remove_all(uic, "[^\\d]*"))
+  # Немного костылей
+  return(dplyr::mutate(input_data, 
+                       street_name = stringr::str_remove_all(street_name, "\\W*$"),
+                       street_name = stringr::str_remove_all(street_name, "^[ ]*"),
+                street_name = stringr::str_replace(street_name, "в\\.о$","в.о.")
+                ))
+         
+  }
+
+
+
 
 # вызов всех этих функций
 
 system.time(uic_dt <- uic_reader(clear_uic_matrix, stop_word_patern, street_name_pattern, suburb_pattern))
 system.time(uic_dt <- cleaning_uic_table(uic_dt))
+system.time(uic_dt <- identifer_unfold(uic_dt, street_identifer_dictinary, suburb_identifer_dictionary))
+system.time(uic_dt <- cleaning_little_uic_table(uic_dt))
 
+# Сохраняем дата фрейм
+saveRDS(uic_dt, file = "./Election_analysis/uic_td.rds")
+
+# Записываем часть этого дата фрейма как вполне себе готовый резульат
+
+write.table(uic_dt[,c(1,5,6,7,8,9)],"./Election_analysis/uic_tab.csv", sep = ";", fileEncoding = "UTF-8")
