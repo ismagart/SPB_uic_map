@@ -14,7 +14,7 @@ uic_table <- readRDS(file = "./Election_analysis/uic_table.rds")
 # Создаем одну матрицу с данными
 
 system.time(clear_uic_matrix <-  do.call(rbind,lapply(uic_table, 
-                            function(x) if(dim(x)[2] == 6) x[,c(1,2,5)] else x[,c(1,2,6)])))
+                            function(x) if(dim(x)[2] == 6) x[,c(1,2,6)] else x[,c(1,2,7)])))
 
 # Подготовливаем переменные для разбиения 
 
@@ -34,7 +34,7 @@ suburb_pattern <- paste0("^(", paste0(suburb_name, collapse = "|"),")\\W?[^,\\d%
 
 # Паттерн с убираемыми словами из заголовка колонок
 stop_word <- c("Адрес помещения для", "Адрес помещения для",
-               "работы участковой", "избирательной комиссии",
+               "голосования \\(наименование", "объекта\\), телефон",
                "\\(наименование объекта\\),", "телефон" )
 stop_word_patern <- paste0(stop_word, collapse = "|")
 
@@ -101,18 +101,18 @@ uic_reader <- function(matrix_uic, stop_word_patern, street_name_pattern, suburb
   gg$street_name[which(gg$uic == "139" | gg$uic == "140" )] <- "ул.остоумова"
   gg$street_name[which(gg$uic == "1254")] <- "ул. восточная"
   gg$street_name[which(gg$uic == "1905")] <- "пр. авиаконструкторов"
-  gg$street_name[which(gg$uic == "158")] <- "ул. наличная"
-  # Решение проблемы большой монетной 29
-  gg$street_name[which(gg$uic == "1634")] <- "большая монетная"
+  gg$street_name[which(gg$uic == "110")] <- "Большой пр."
   # Слипание пригорода и улицы
   gg$street_name[which(gg$uic == "1701")] <- "ул. ульяновская"
-  gg$street_name[which(gg$uic == "1725" | gg$uic == "1724")] <- "советская ул."
   # Дан только номер школы
   gg$street_name[which(gg$uic == "1146")] <- "ул. чекистов"
   gg$house_number[which(gg$uic == "1146")] <- "д. 18"
   gg$house_number[which(gg$uic == "1982")] <- "д. 12"
   gg$house_number[which(gg$uic == "2000" | gg$uic == "2001")] <- "д. 19"
   gg$house_liter[which(gg$uic == "2000" | gg$uic == "2001")] <- "А"
+  gg$street_name[which(gg$uic == "1386")] <- "Краснопутиловская ул."
+  gg$house_number[which(gg$uic == "1386")] <- "д. 60"
+  
   
   return(gg)
 }
