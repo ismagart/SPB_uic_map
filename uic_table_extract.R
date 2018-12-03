@@ -102,6 +102,11 @@ uic_reader <- function(matrix_uic, stop_word_patern, street_name_pattern, suburb
   gg$street_name[which(gg$uic == "1254")] <- "ул. восточная"
   gg$street_name[which(gg$uic == "1905")] <- "пр. авиаконструкторов"
   gg$street_name[which(gg$uic == "110")] <- "Большой пр."
+  gg$house_number[which(gg$uic == "145")] <- "д.15"
+  gg$house_number[which(gg$uic == "1990")] <- "д.14" 
+  gg$house_liter[which(gg$uic == "1990")] <- "А"
+  gg$house_number[which(gg$uic == "1997")] <- "д.30"
+  gg$suburb_name[which(gg$uic == "1997")] <- "пос. Шушары"
   # Слипание пригорода и улицы
   gg$street_name[which(gg$uic == "1701")] <- "ул. ульяновская"
   # Дан только номер школы
@@ -186,6 +191,18 @@ street_identifer_dictinary <- list(list(c("бул\\.","б- р", "\\bбул\\b", 
 
 suburb_identifer_dictionary <- list(list(c("\\bп\\.", "\bпос\\.", "\\bПос\\.", "поселок", "\\bпос\\b"), "посёлок"),
                                     list("г\\.", "город"))
+abbreviation_dictionary <- list(list("\\bд\\.\\W*","демьяна "),
+                                list("\\bб\\.\\W*", c("большая ", "большой ")),
+                                list("\\bак\\.\\W*", "академика "),
+                                list("\\bс\\.\\W*", "софьи "),
+                                list("\\bм\\.\\W*б", "маршала б"),
+                                list("\\bп\\.\\W*", "пограничника "),
+                                list("\\bл\\.\\W*т", "льва т"),
+                                list("\\bм\\.\\W*р", "малая р"),
+                                list("\\bкр\\.\\W*к", "красного к"),
+                                list("\\bа\\.\\W*т", "алексея т"),
+                                list("\\bпроф\\.W*", "профессора "),
+                                list("\\bл\\.\\W*ш", "лейтенанта ш"))
 
 # разворачиваем всякие сокращения в идентификаторах
 identifer_unfold <- function(input_data, dictionary_list_street, dictionary_list_suburb){
@@ -209,7 +226,8 @@ identifer_unfold <- function(input_data, dictionary_list_street, dictionary_list
     input_data$suburb_name[position_suburb] <- stringr::str_remove_all(input_data$suburb_name[position_suburb], pattern)
     # убираемся, это всякие пустые места в начале
     input_data$suburb_name[position_suburb] <- stringr::str_remove_all(input_data$suburb_name[position_suburb], "^[ ]*\\.*[ ]*")
-  }
+    # input_data$suburb_identifer[position_suburb]   <- i[[2]]
+    }
   return(input_data)
 }
 
@@ -235,7 +253,19 @@ cleaning_little_uic_table <- function(input_data){
          
   }
 
-
+abbreviation_expand <- function(input_data,abb_dictionary ){
+  for( i in abb_dictionary){
+    abbr_position <- which(stringr::str_detect(input_data$street_name, i[[1]]) == T)
+    if(length(i[[2]]) == 2){
+      replace_vector <- dplyr::if_else(stringr::str_detect(input_data$street_name[abbr_position], "проспект")  == T, i[[2]][2], i[[2]][1])
+    }else{
+      replace_vector <- rep(i[[2]], length(abbr_position))
+    }
+    replace_value <- stringr::str_replace_all(input_data$street_name[abbr_position], i[[1]], replace_vector)
+    input_data$street_name[abbr_position] <- replace_value
+  }
+  return(input_data)
+}
 
 
 # вызов всех этих функций
@@ -244,6 +274,7 @@ system.time(uic_dt <- uic_reader(clear_uic_matrix, stop_word_patern, street_name
 system.time(uic_dt <- cleaning_uic_table(uic_dt))
 system.time(uic_dt <- identifer_unfold(uic_dt, street_identifer_dictinary, suburb_identifer_dictionary))
 system.time(uic_dt <- cleaning_little_uic_table(uic_dt))
+system.time(uic_dt <- abbreviation_expand(uic_dt,abbreviation_dictionary))
 
 # Сохраняем дата фрейм
 saveRDS(uic_dt, file = "./Election_analysis/uic_td.rds")
