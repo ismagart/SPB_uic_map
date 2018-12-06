@@ -34,28 +34,33 @@ ggt$nomit_query[3]
 # а так же можно менять написание улиц
 # Прорабоать случай когда длины index_vector, street_preposition могут оказаться различными
 # или сделать их парными в одном листе
-creator_query <- function(input_df,maiun_url, parameters ,index_vector, street_preposition){
+# Лучше в качетве параметра задачать сразу свой параметр полной строчки
+creator_query <- function(input_df,maiun_url, parameters,liter = TRUE,corpus = TRUE ,index_vector, street_preposition){
   if(missing(index_vector)){
     # Если упущен вектор позиций, значит работает со всеми и запуск впервыи
     input_df$adres_clear <- NA
     input_df$nomit_query <- NA
     index_vector <- 1:nrow(input_df)
   }
-  print(length(index_vector))
   if(missing(street_preposition)){
     street_preposition <- input_df$street_name[index_vector]
   }
-  print(length(street_preposition))
-  
-  house_num_liter <- paste0(input_df$house_number[index_vector], ifelse(is.na(input_df$house_liter[index_vector]), "", input_df$house_liter[index_vector]))
+  if(liter == FALSE){
+    house_num_liter <- input_df$house_number[index_vector]
+  }else{
+    house_num_liter <- paste0(input_df$house_number[index_vector], ifelse(is.na(input_df$house_liter[index_vector]), "", input_df$house_liter[index_vector]))
+  }
+  if(corpus == FALSE){
+    house_corpus <- rep("",length(index_vector))
+  }else{
   house_corpus <- ifelse(is.na(input_df$house_corpus[index_vector]),"", paste0("к", input_df$house_corpus[index_vector]))
+  }
   house_number <- str_remove(paste(house_num_liter,house_corpus), "[ ]$")
   street_name <- ifelse(is.na(street_preposition), "", street_preposition)
   suburb_name <- ifelse(is.na(input_df$suburb_name[index_vector]), "", input_df$suburb_name[index_vector])
   city_name <- "Санкт-Петербург"
   
   adres <- str_remove_all(paste(house_number, street_name, suburb_name, city_name, sep = ", "), " ,")
-  print(length(adres))
   input_df$adres_clear[index_vector] <- adres
   # nominatim_start <- "https://nominatim.openstreetmap.org/search?q="
   # qury_param <- "&format=jsonv2&addressdetails=1&polygon=0&limit=1"
@@ -117,13 +122,13 @@ nomunatim_geocode <- function(request_vecror){
 system.time(test_list <- lapply(ggt$nomit_query, function(x) nomunatim_geocode(x)))
 # Сохраняем парсинг
 saveRDS(test_list, file = "./Election_analysis/parse_list.rds")
+# Специальано сохранили как parse_list_first_run.rds чтоб можно было откатиться
 
 test_result <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
 # Проверяем ранк места, чтоб понять дом это ли это (30) или нечто большее
 # NULL гововрит что не удалось найти
 qual <- sapply(test_result, function(x) unlist(x$place_rank),USE.NAMES = FALSE)
-qual[848]
-qual[615]
+
 # качество около 63 процентов
 length(qual[qual == "30"])/length(qual)
 head(is.null(qual))
@@ -131,7 +136,9 @@ head(is.null(qual))
 null_qual <- sapply(qual, function(x) is.null(x))
 # Позиция где NULL для них возможно переделать запрос
 which(null_qual == T)
-
+# Просто позиции которые не нашлись правильно переделываем запрос
+not_match_qual <- sapply(qual, function(x) ifelse(is.null(x), TRUE,x !="30"))
+length(which(not_match_qual == T))
 
 # Создаем функцию, которая меняет местами улицу и адрес
 alternative_street_query <- function(input_data, index_vector){
@@ -147,25 +154,141 @@ alternative_street_query <- function(input_data, index_vector){
   return(new_street_name)
 }
 
-replace_street <- alternative_street_query(gg, which(null_qual == T))
+replace_street <- alternative_street_query(ggt, which(not_match_qual == T))
 # Запросы к nominatim изменились
-gg <- creator_query(gg,nominatim_start,qury_param, which(null_qual == T), replace_street )
+gg <- creator_query(gg,nominatim_start,qury_param, which(not_match_qual == T), replace_street )
 
-gg$street_name[c(1,2,3,848,613)]
-gg$street_identifer
-
-# но нужно помнить что ещё есть литеры
-
-test <- c("fgh tyu", "tyu fgh")
-str_remove_all(test, "fgh")
-
-paste0("(",c("fgh", "fgh"),"|",str_remove_all(test, "fgh"),")(",str_remove_all(test, "fgh"),"|",c("fgh", "fgh"),")")
-paste0("(",c("fgh", "fgh"),"|",str_remove_all(test, "fgh"),")(",str_remove_all(test, "fgh"),"|",c("fgh", "fgh"),")")
-
-str_replace(test, c("fgh", "tyu"), "замена")
-
-str_remove_all(str_replace_all(test, "(fgh|[ ]?tyu[ ]?)([ ]?tyu[ ]?|fgh)", "\\2 \\1"), "^[ ]|[ ]$")
-install.packages("textclean")
-library(textclean)
-swap("fgh tyu", "fgh", "tyu")
 head(which(null_qual == T))
+system.time(update_list <- lapply(gg$nomit_query[which(not_match_qual == T)], function(x) nomunatim_geocode(x)))
+
+# Обновляем наш лист запросов
+test_list[which(not_match_qual == T)] <- update_list
+# Обновляем лист json
+requir_json <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
+# Новый фактор качества
+qual_swap_street <- sapply(requir_json, function(x) unlist(x$place_rank))
+# Качество стало 75 %
+length(qual_swap_street[qual_swap_street == "30"])/length(qual_swap_street)
+# Смотрим что не заматчило и вектор из FALSE чтоб потом сравнить с начальной 
+# и выделить то, что не помогло
+not_match_qual_swap_street <- sapply(qual_swap_street, function(x) ifelse(is.null(x), TRUE,x !="30"))
+# незаматчилось 453
+length(which(not_match_qual_swap_street == T))
+# Так как изначально меняли только то что не определилось, то 
+# Есть переход от F -> T, значит новые вектор мисматчей сразу же используем
+# Для новых модификаций
+# Вопрос о порядке их открыт
+
+# Создаем функцию, которая будет убирать литеру в строке адреса
+# Просто добавили параметр в функцию построения запроса, чтоб одна строчка менялась
+
+# Делаем новый запрос, улицы будут как в первом, но литера уберутся
+gg <- creator_query(gg,nominatim_start,qury_param,liter = FALSE, which(not_match_qual_swap_street == T) )
+system.time(update_list <- lapply(gg$nomit_query[which(not_match_qual_swap_street == T)], function(x) nomunatim_geocode(x)))
+# Обновляем наш лист запросов
+test_list[which(not_match_qual_swap_street == T)] <- update_list
+# Обновляем лист json
+requir_json <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
+# Новый фактор качества
+qual_drop_liter <- sapply(requir_json, function(x) unlist(x$place_rank))
+# Качество стало 88 %
+length(qual_drop_liter[qual_drop_liter == "30"])/length(qual_drop_liter)
+
+# Совмещаем два подхода
+not_match_qual_drop_liter <- sapply(qual_drop_liter, function(x) ifelse(is.null(x), TRUE,x !="30"))
+length(which(not_match_qual_drop_liter == T))
+
+replace_street_liter <- alternative_street_query(gg, which(not_match_qual_drop_liter == T))
+gg <- creator_query(gg,nominatim_start,qury_param,liter = FALSE, which(not_match_qual_drop_liter == T), replace_street_liter )
+
+system.time(update_list <- lapply(gg$nomit_query[which(not_match_qual_drop_liter == T)], function(x) nomunatim_geocode(x)))
+
+test_list[which(not_match_qual_drop_liter == T)] <- update_list
+requir_json <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
+
+qual_swap_street_liter <- sapply(requir_json, function(x) unlist(x$place_rank))
+# Точность повысилась до 89%
+length(qual_swap_street_liter[qual_swap_street_liter == "30"])/length(qual_swap_street_liter)
+
+# Посмотрим адреса которые дали плохой матчинг
+not_match_qual_street_liter <- sapply(qual_swap_street_liter, function(x) ifelse(is.null(x), TRUE,x !="30"))
+
+gg$adres_clear[which(not_match_qual_street_liter == T)]
+
+# Иногда мешают корпуса -- возможно попровить
+# ПРоблемы с линиями -- возможно попровить
+# Буквы Ё Лёни Голикова улицы -- возможно поправить
+# отсутствие дефиса между числом и буквой -- возможно поравить
+# проблемы с дробью -- только ручное
+# нет идентификатора улиц -- толькое ручное
+# чего-то нет на картах осм
+# Некоторые корпуса прописаны как дробь
+
+# надо проверить не только по типу матчинга (дом) вдруг это не те дома
+
+# Пробуем убрать корпуса. сразу число кобинаций растет((
+gg <- creator_query(gg,nominatim_start,qury_param,liter = TRUE,corpus = FALSE, which(not_match_qual_street_liter == T))
+
+system.time(update_list <- lapply(gg$nomit_query[which(not_match_qual_street_liter == T)], function(x) nomunatim_geocode(x)))
+
+test_list[which(not_match_qual_street_liter == T)] <- update_list
+requir_json <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
+
+qual_corpus <- sapply(requir_json, function(x) unlist(x$place_rank))
+# Точность повысилась до 91,6%
+length(qual_corpus[qual_corpus == "30"])/length(qual_corpus)
+
+# Посмотрим адреса которые дали плохой матчинг
+not_match_corpus <- sapply(qual_corpus, function(x) ifelse(is.null(x), TRUE,x !="30"))
+
+# Без корпуса и литера
+gg <- creator_query(gg,nominatim_start,qury_param,liter = FALSE,corpus = FALSE, which(not_match_corpus == T))
+
+system.time(update_list <- lapply(gg$nomit_query[which(not_match_corpus == T)], function(x) nomunatim_geocode(x)))
+
+test_list[which(not_match_corpus == T)] <- update_list
+requir_json <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
+
+qual_corpus_liter <- sapply(requir_json, function(x) unlist(x$place_rank))
+# Точность повысилась до 91,9%
+length(qual_corpus_liter[qual_corpus_liter == "30"])/length(qual_corpus_liter)
+
+# Посмотрим адреса которые дали плохой матчинг
+not_match_corpus_liter <- sapply(qual_corpus_liter, function(x) ifelse(is.null(x), TRUE,x !="30"))
+
+# Без корпуса, с литером, но улицы поменяем
+replace_street_corpus <- alternative_street_query(gg, which(not_match_corpus_liter == T))
+gg <- creator_query(gg,nominatim_start,qury_param,liter = TRUE,corpus = FALSE, which(not_match_corpus_liter == T), replace_street_corpus )
+
+system.time(update_list <- lapply(gg$nomit_query[which(not_match_corpus_liter == T)], function(x) nomunatim_geocode(x)))
+
+test_list[which(not_match_corpus_liter == T)] <- update_list
+requir_json <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
+
+qual_corpus_street <- sapply(requir_json, function(x) unlist(x$place_rank))
+# Точность повысилась не поменялась
+length(qual_corpus_street[qual_corpus_street == "30"])/length(qual_corpus_street)
+
+# Посмотрим адреса которые дали плохой матчинг
+not_match_corpus_street <- sapply(qual_corpus_street, function(x) ifelse(is.null(x), TRUE,x !="30"))
+
+# Без корупса, лицы поменяли и без литера
+
+replace_street_corpus_liter <- alternative_street_query(gg, which(not_match_corpus_street == T))
+gg <- creator_query(gg,nominatim_start,qury_param,liter = FALSE,corpus = FALSE, which(not_match_corpus_street == T), replace_street_corpus_liter )
+
+system.time(update_list <- lapply(gg$nomit_query[which(not_match_corpus_street == T)], function(x) nomunatim_geocode(x)))
+
+test_list[which(not_match_corpus_street == T)] <- update_list
+requir_json <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
+
+qual_corpus_street_liter <- sapply(requir_json, function(x) unlist(x$place_rank))
+# Точность повысилась не поменялась почти 92%
+length(qual_corpus_street_liter[qual_corpus_street_liter == "30"])/length(qual_corpus_street_liter)
+
+# Посмотрим адреса которые дали плохой матчинг
+not_match_corpus_street <- sapply(qual_corpus_street, function(x) ifelse(is.null(x), TRUE,x !="30"))
+gg$adres_clear[not_match_corpus_street]
+
+missing_street_name <- gg$street_name[not_match_corpus_street]
+test <- as.data.frame(missing_street_name)
