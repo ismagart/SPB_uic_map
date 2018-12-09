@@ -3,31 +3,17 @@ library(tabulizer)
 library(dplyr)
 library(stringr)
 library(urltools)
+library(XML)
+library(httr)
+library(xml2)
 # Считываем таблицу
 ggt <- readRDS("./Election_analysis/uic_td.rds")
-nominatim_start <- "https://nominatim.openstreetmap.org/search?q="
-query <- "q="
-
-house_num_liter <- paste0(ggt$house_number, ifelse(is.na(ggt$house_liter), "", ggt$house_liter))
-
-house_corpus <- ifelse(is.na(ggt$house_corpus),"", paste0("к", ggt$house_corpus))
-house_number <- str_remove(paste(house_num_liter,house_corpus), "[ ]$")
-
-street_name <- ifelse(is.na(ggt$street_name), "", ggt$street_name)
-suburb_name <- ifelse(is.na(ggt$suburb_name), "", ggt$suburb_name)
-city_name <- "Санкт-Петербург"
-
-adress <- str_remove_all(paste(house_number, street_name, suburb_name, city_name, sep = ", "), " ,")
-
-ggt$adres_clear <- adress
-house_corpus<- ifelse(is.na(ggt$house_corpus[89]),"", paste0(url_encode(enc2utf8("к")), ggt$house_corpus[89]))
-paste
-# Всё работает если адрес есть, если его нет, то печаль
-# Ограничимся только одним лучшим резульататом
+# параметры запроса к nominatim
+# просим формат json с ним удобнее работать, он сразу как лист распознается
+# просим возвращать детали адресса
+# не проси возвращать границы полигонов здания
+# берем только первый ответ
 qury_param <- "&format=jsonv2&addressdetails=1&polygon=0&limit=1"
-query <- paste0(nominatim_start,"q=", url_encode(enc2utf8(adress)),qury_param)
-ggt$nomit_query <- query
-ggt$nomit_query[3]
 
 # нужно сдлеать функцию, которая бы создавала запрос
 # Можно выбрать какие строчки будут давать запрос
@@ -68,49 +54,11 @@ creator_query <- function(input_df,maiun_url, parameters,liter = TRUE,corpus = T
   input_df$nomit_query[index_vector] <- query
   return(input_df)
 }
-gg <- ggt[,c(1:10)]
-gg <- creator_query(gg,nominatim_start,qury_param)
 
-install.packages("XML")
-library(XML)
-test <- xmlParse(ggt$nomit_query[3])
-test <- xmlTreeParse(ggt$nomit_query[3])
-# Нужно сначала отправить запрос
-install.packages("httr")
-library(httr)
-test <- httr::GET(ggt$nomit_query[3])
-str(test)
-test
-headers(test)
-# Проверка статуса запроса
-http_status(test)
-install.packages("xml2")
-library(xml2)
-# json нормальный формат, он считывается понятнее и парсится
-info_test <- content(test, as = "parsed",type = "application/json", encoding = "UTF-8")
-str(info_test)
-info_test
-print(content(test, as = "parsed", type = "text/xml", encoding = "UTF-8"))
+# Создали первый вариант запросов
+ggt <- creator_query(ggt,nominatim_start,qury_param)
 
-sapply(info_test, function(x) x$status_code)
-test$content
-# Извлика с задержкой чтоб не забанили
-# Первую сотню парсим
-# Не верно timeout(1) обрывает соединение, придется писать свою функцию
-test_list <- lapply(ggt$nomit_query, function(x) httr::GET(x, timeout(1)))
-# Вроде как все считалось
-sapply(test_list, function(x) x$status_code)
-
-# test_result <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = F))
-# head(sapply(test_result, function(x) x$place_rank))
-
-gg <- unlist(test_result[1], recursive = FALSE)
-gg$boundingbox
-str(test_result[1])
-str(test_result[[1]])
-str(gg$place_rank)
-
-# Фунций которая дает задержу, а не то забанят
+# Фунция которая дает задержу 1 cек, а не то забанят
 # Нужен стопер мало ли там все завислл на запросе одном
 nomunatim_geocode <- function(request_vecror){
   curr_value <- httr::GET(request_vecror)
@@ -118,7 +66,9 @@ nomunatim_geocode <- function(request_vecror){
   return(curr_value)
 }
 
-# Получилось
+
+# создаем новый лист который содерижит ответы на запрос, число элементов в нем
+# равно числу запросов, даже если ответ NULL 
 system.time(test_list <- lapply(ggt$nomit_query, function(x) nomunatim_geocode(x)))
 # Сохраняем парсинг
 saveRDS(test_list, file = "./Election_analysis/parse_list.rds")
@@ -220,7 +170,7 @@ gg$adres_clear[which(not_match_qual_street_liter == T)]
 # Буквы Ё Лёни Голикова улицы -- возможно поправить
 # отсутствие дефиса между числом и буквой -- возможно поравить
 # проблемы с дробью -- только ручное
-# нет идентификатора улиц -- толькое ручное
+# нет идентификатора улиц -- возможно попроваить
 # чего-то нет на картах осм
 # Некоторые корпуса прописаны как дробь
 
@@ -287,8 +237,135 @@ qual_corpus_street_liter <- sapply(requir_json, function(x) unlist(x$place_rank)
 length(qual_corpus_street_liter[qual_corpus_street_liter == "30"])/length(qual_corpus_street_liter)
 
 # Посмотрим адреса которые дали плохой матчинг
-not_match_corpus_street <- sapply(qual_corpus_street, function(x) ifelse(is.null(x), TRUE,x !="30"))
+not_match_corpus_street_liter <- sapply(qual_corpus_street, function(x) ifelse(is.null(x), TRUE,x !="30"))
 gg$adres_clear[not_match_corpus_street]
 
 missing_street_name <- gg$street_name[not_match_corpus_street]
 test <- as.data.frame(missing_street_name)
+
+# Обновляем уже сами улицы чтоб улучшить матчинг, 
+# все эти изменения будут делать на уровне считывая данных
+# тут добавил чтоб на запускать матчинг опять
+
+# пропуски в улицах с номерами
+for( i in some_miswriting_dictionary){
+  line_position <- which(str_detect(gg$street_name, i[1]) == T)
+  gg$street_name[line_position] <- str_replace(gg$street_name[line_position],i[1],i[2])
+}
+# улицы без идентификатора
+for( i in street_wh_iden_dictionary){
+  line_position <- which(str_detect(gg$street_name, i[1]) == T)
+  gg$street_name[line_position] <- i[[2]]
+  # временное решение чтобы тестить на матчинг 
+  # gg$street_identifer[line_position] <- "улица"
+}
+
+# линии всякие 
+for( i in line_dictionary){
+  line_pattern <- paste0("(",paste0(i[[1]], collapse  = "|"),")")
+  line_position <- which(str_detect(gg$street_name, line_pattern) == T)
+  gg$street_name[line_position] <- i[[2]]
+}
+
+# буква Ё
+for(i in e_yo_dictionary){
+  prep_osition <- which(str_detect(gg$street_name, i[1]) == T)
+  gg$street_name[prep_osition] <- str_replace(gg$street_name[prep_osition], i[1], i[2])
+}
+
+# Поменяли сами улицы деламем матчинги
+gg <- creator_query(gg,nominatim_start,qury_param, liter = TRUE,corpus = TRUE, which(not_match_corpus_street_liter == T))
+
+system.time(update_list <- lapply(gg$nomit_query[which(not_match_corpus_street_liter == T)], function(x) nomunatim_geocode(x)))
+
+test_list[which(not_match_corpus_street_liter == T)] <- update_list
+requir_json <- lapply(test_list, function(x) unlist(content(x, as = "parsed",type = "application/json", encoding = "UTF-8"), recursive = FALSE))
+
+qual_modify_street_name <- sapply(requir_json, function(x) unlist(x$place_rank))
+# Точность повысилась до 94%
+length(qual_modify_street_name[qual_modify_street_name == "30"])/length(qual_modify_street_name)
+
+# Посмотрим адреса которые дали плохой матчинг
+not_match_modify_street_name <- sapply(qual_modify_street_name, function(x) ifelse(is.null(x), TRUE,x !="30"))
+
+
+
+
+manual_work <- gg$adres_clear[not_match_modify_street_name]
+manual_df <- data.frame(x = which(not_match_modify_street_name == T), y = manual_work) 
+# далее по видимому вручную надо
+# деаем лист которые сожержит 
+# инфу(позиция, номер дома, литер, корпус,улица,пригород,идентификатор)
+namual_work[1]
+manual_data <- list(list(1, c("14", NA,NA,"лермонтовский проспект", NA, "проспект")),
+                    list(5, c("15", NA,NA,"лермонтовский проспект", NA, "проспект")),
+                    list(11, c("4-6", NA, NA, "набережная реки пряжки", NA, "набережная")),
+                    list(19, c("38/4", NA,NA, "вознесенский проспект", NA, "проспект")),
+                    list(24, c("1", NA, NA, "средняя подьяческая улица", NA, "улица")),
+                    list(25, c("1", NA, NA, "средняя подьяческая улица", NA, "улица")),
+                    list(40, c("17", NA, NA, "малодетскосельский проспект", NA, "проспект")),
+                    list(62, c("3", NA, NA, "кадетская линия в.о.", NA, "линия")),
+                    list(63, c("3", NA, NA, "кадетская линия в.о.", NA, "линия")),
+                    list(66, c("52", NA, NA, "7-я линия в.о.", NA, "линия")),
+                    list(68, c("31", NA, NA, "большой проспект в.о.", NA, "проспект")),
+                    list(69, c("1/15", NA, NA, "набережная лейтенанта шмидта", NA, "набережная")),
+                    list(72, c("1/15", NA, NA, "набережная лейтенанта шмидта", NA, "набережная")),
+                    list(79, c("52", NA, NA, "7-я линия в.о.", NA, "линия")),
+                    list(92, c("3", "А", NA, "улица шевченко", NA, "улица")),
+                    list(96, c("5", NA, NA, "шкиперский проток", NA, "проток")),
+                    list(97, c("26", NA, NA, "улица шевченко", NA, "улица")),
+                    list(98, c("26", NA, NA, "улица шевченко", NA, "улица")),
+                    list(135, c("2", NA, NA, "переулок каховского", NA, "переулок")),
+                    list(136, c("2", NA, NA, "переулок каховского", NA, "переулок")),
+                    list(306, c("12/2", NA, NA, "проспект непокорённых", NA, "проспект")),
+                    list(415, c("1", NA, NA, "средняя подьяческая улица", NA, "улица")),
+                    list(471, c("32", NA, NA, "ЗСД", NA, NA)),
+                    list(472, c("32", NA, NA, "ЗСД", NA, NA)),
+                    list(549, c("30", NA, "2", "улица стойкости", NA, "улица")),
+                    list(551, c("30", NA, "2", "улица стойкости", NA, "улица")),
+                    list(677, c("8", "А", NA, "большая пороховская улица", NA, "улица")),
+                    list(678, c("8", "А", NA, "большая пороховская улица", NA, "улица")),
+                    list(814, c("40", NA, NA, "улица лётчика пилютова", NA, "улица")),
+                    list(924, c("5", NA, NA, "улица лебедева", "кронштадт", "улица")),
+                    list(925, c("5", NA, NA, "улица лебедева", "кронштадт", "улица")),
+                    list(926, c("4/11", NA, NA, "улица рошаля", "кронштадт", "улица")),
+                    list(927, c("4/11", NA, NA, "улица рошаля", "кронштадт", "улица")),
+                    list(952, c("140", NA, NA, "2-й проезд", "песочный", NA)),
+                    list(953, c("53", NA, NA, " улица ленинградская", "Песочный", "улица")),
+                    list(957, c("5", NA, NA, "улица лесная", "серово", "улица")),
+                    list(958, c("9", NA, NA, "проспект красных командиров", "Сестрорецк", "проспект")),
+                    list(1195, c("10", NA, NA, "проспект пятилеток", NA, "проспект")),
+                    list(1196, c("10", NA, NA, "проспект пятилеток", NA, "проспект")),
+                    list(1197, c("10", NA, NA, "проспект пятилеток", NA, "проспект")),
+                    list(1234, c("8", NA, "2", " улица кибальчича", NA, "улица")),
+                    list(1275, c("36/73", NA, NA, "каменноостровский проспект", NA, "проспект")),
+                    list(1277, c("5/7", NA, NA, "сытнинская площадь", NA, "площадь")),
+                    list(1278, c("2", NA, NA, "улица большая монетная", NA, "улица")),
+                    list(1281, c("3", NA, NA, "троицкая площадь п.с.", NA, "площадь")),
+                    list(1282, c("5", NA, NA, "большая посадская улица", NA, "улица")),
+                    list(1284, c("5", NA, NA, "большая посадская улица", NA, "улица")),
+                    list(1292, c("69", NA, NA, "каменноостровский проспект", NA, "проспект")),
+                    list(1294, c("42", NA, NA, "каменноостровский проспект", NA, "проспект")),
+                    list(1299, c("4", "Б", NA, "пудожская улица", NA, "улица")),
+                    list(1302, c("29/2", NA, NA, "большой проспект п.с.", NA, NA)),
+                    list(1315, c("4", "Б", NA, "пудожская улица", NA, "улица")),
+                    list(1317, c("25", "А", NA, "чкаловский проспект", NA, "проспект")),
+                    list(1324, c("102", "А", NA, "санкт-петербургское шоссе", NA, "шоссе")),
+                    list(1342, c("10", NA, "1", "улица шахматова", "петергоф", "улица")),
+                    list(1343, c("10", NA, "1", "улица шахматова", "петергоф", "улица")),
+                    list(1348, c("40", "Б", NA, "дворцовый проспект", "Ломоносов", "проспект")),
+                    list(1350, c("8", "А", NA, "улица сафронова", "Ломоносов", "улица")),
+                    list(1351, c("8", "А", NA, "улица сафронова", "Ломоносов", "улица")),
+                    list(1406, c("7", NA, "3", "яхтенная улица", NA, "улица")),
+                    list(1407, c("7", NA, "3", "яхтенная улица", NA, "улица")),
+                    list(1408, c("7", NA, "3", "яхтенная улица", NA, "улица")),
+                    list(1431, c("16", NA, "2", "новосибирская улица", NA, "улица")),
+                    list(1432, c("16", NA, "2", "новосибирская улица", NA, "улица")),
+                    list(1542, c("4", NA, "4", "новоколомяжский проспект", NA, "проспект")),
+                    list(1543, c("4", NA, "4", "новоколомяжский проспект", NA, "проспект")),
+                    list(1544, c("4", NA, "4", "новоколомяжский проспект", NA, "проспект")),
+                    list(1545, c("4", NA, "4", "новоколомяжский проспект", NA, "проспект")),
+                    list(1546, c("52", NA, NA, "поклонногорская улица", NA, "улица")),
+                    list(1767, c("8", NA, NA, "гродненский переулок", NA, "переулок")),
+                    list(1791, c("9/27", NA, NA, "кузнечный переулок", NA, "улица"))                    )
+
