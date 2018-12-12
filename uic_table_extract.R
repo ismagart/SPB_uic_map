@@ -28,7 +28,7 @@ street_name_pattern <- paste0("[^,\"]*(",paste(street_identifer, collapse = "|")
                               ")[^,:(]*", collapse = "")
 
 # Паттерн для пригородов
-suburb_name <-c("пос\\.", "посёлок", "поселок", "п\\.", "Пос\\.", "г\\.")
+suburb_name <-c("пос\\.", "посёлок", "поселок", "п\\.", "Пос\\.", "г\\.", "Колпин") # костыль для колпино
 suburb_pattern <- paste0("^(", paste0(suburb_name, collapse = "|"),")\\W?[^,\\d%(]+" )
 
 
@@ -67,10 +67,10 @@ uic_reader <- function(matrix_uic, stop_word_patern, street_name_pattern, suburb
       adres_string <- stringr::str_replace_all(stringr::str_replace_all(adres_string, stop_word_patern, ""), "\\r", " ")
       full_adres_string <- paste(adres_string[nzchar(adres_string)], collapse = "%%")
       gg[k,4] <- full_adres_string
-      # опрределям название улицы
+      # определям название улицы
       gg[k,5] <- stringr::str_extract(stringr::str_to_lower(full_adres_string),street_name_pattern)
       gg[k,6] <- stringr::str_extract(full_adres_string,"(д\\.|дом|(д No))\\W*(No)?\\W*\\d{0,3}(\\/\\d{0,3})?")
-      gg[k,7] <- stringr::str_extract(full_adres_string, "(к\\.|корпус)\\W*\\d{0,3}")
+      gg[k,7] <- stringr::str_extract(full_adres_string, "(к\\.|корпус)\\W*\\d{1,3}")
       gg[k,8] <- stringr::str_extract(full_adres_string,
                              "((лит\\.|литера|литер)(\\W*)(А|Б|В|Г))|(\\d(а|б|в|г|А|Б|В|Г))|(\\d[ ](а|б|в|г)\\W)")
       gg[k,9] <- stringr::str_extract(full_adres_string, suburb_pattern)
@@ -86,10 +86,10 @@ uic_reader <- function(matrix_uic, stop_word_patern, street_name_pattern, suburb
       adres_string <- stringr::str_replace_all(adres_string, stop_word_patern, "")
       full_adres_string <- paste(adres_string[nzchar(adres_string)], collapse = "%%")
       gg[k,4] <- full_adres_string
-      # опрределям название улицы
+      # определям название улицы
       gg[k,5] <- stringr::str_extract(stringr::str_to_lower(full_adres_string),street_name_pattern)
       gg[k,6] <- stringr::str_extract(full_adres_string,"(д\\.|дом)\\W*(No)?\\W*\\d{0,3}(\\/\\d{0,3})?")
-      gg[k,7] <- stringr::str_extract(full_adres_string, "(к\\.|корпус)\\W*\\d{0,3}")
+      gg[k,7] <- stringr::str_extract(full_adres_string, "(к\\.|корпус)\\W*\\d{1,3}")
       gg[k,8] <- stringr::str_extract(full_adres_string,
                              "((лит\\.|литера|литер)(\\W*)(А|Б|В|Г))|(\\d(а|б|в|г|А|Б|В|Г))|(\\d[ ](а|б|в|г)\\W)")
       gg[k,9] <- stringr::str_extract(full_adres_string, suburb_pattern)
@@ -137,15 +137,19 @@ cleaning_uic_table <- function(uic_dataframe){
                                     clean_dt$street_name[i])
   }
   # улицы без идентификатора, что это улицы или проспекты
-  empty_street_position <- which(is.na(clean_dt$street_name) == T & is.na(clean_dt$suburb_name) == T & is.na(clean_dt$house_number) != T)
+  # empty_street_position <- which(is.na(clean_dt$street_name) == T & is.na(clean_dt$suburb_name) == T & is.na(clean_dt$house_number) != T)
+  empty_street_position <- which(is.na(clean_dt$street_name) == T &  is.na(clean_dt$house_number) != T)
   for (i in empty_street_position){
     street_empty_pattern <- paste0("[^,\\.\\d]*\\W*(",
                                    paste0(str_replace(clean_dt$house_number[i], "\\.", "\\\\." ),")", collapse = ""))
-    clean_dt[i,5] <- stringr::str_remove_all(stringr::str_extract(stringr::str_to_lower(clean_dt$adres[i]), street_empty_pattern),
-                                             stringr::str_replace(clean_dt$house_number[i], "\\.", "\\\\." ))
+    # str_remove(clean_dt$adres[i], clean_dt$suburb_name[i])
+    replace_string <- ifelse(is.na(clean_dt$suburb_name[i]) == T, clean_dt$adres[i], str_remove(clean_dt$adres[i], clean_dt$suburb_name[i]))
+    extract_string <- str_extract(str_to_lower(replace_string),street_empty_pattern)
+    clean_string <- str_remove_all(extract_string,stringr::str_replace(clean_dt$house_number[i], "\\.", "\\\\." ))
+    clean_dt[i,5] <- clean_string
   }
   
-  # Чистка посёлков от названия улиц и наоборот
+  # Чистка посёлков от названия улиц 
   bad_suburb_position <- which(apply(clean_dt[,c('street_name','suburb_name')], 1,function(x) stringr::str_detect(stringr::str_to_lower(x[2]), x[1])))
   for( i in bad_suburb_position){
     suburb_double_pattern <- paste0(".*(",
@@ -153,7 +157,11 @@ cleaning_uic_table <- function(uic_dataframe){
     clean_dt[i,9] <-  stringr::str_remove_all(stringr::str_extract(stringr::str_to_lower(clean_dt$suburb_name[i]), suburb_double_pattern),
                                               stringr::str_replace(clean_dt$street_name[i], "\\.", "\\\\." ))
   }
-  
+  # чистка улиц от попадания туда поселков
+  # bad_street_position <- which(apply(clean_dt[,c('street_name','suburb_name')], 1,function(x) stringr::str_detect(stringr::str_to_lower(x[1]), str_to_lower(x[2]))))
+  # for( i in bad_street_position){
+  #   clean_dt[i,5] <-  stringr::str_remove_all(clean_dt$street_name[i], str_to_lower(clean_dt$suburb_name[i]))
+  # }
   
   # знаки %% в адресах
   #обозначение цифры в графе литеры
@@ -452,8 +460,22 @@ manual_data <- list(list(1, c("14", NA,NA,"лермонтовский просп
                     list(1791, c("9/27", NA, NA, "кузнечный переулок", NA, "улица"))                    )
 
 for(i in manual_data){
-  uic_dt[i[[1]],c(6,7,8,5,9,10)] <- i[[2]]
+  uic_dt[i[[1]],c(6,8,7,5,9,10)] <- i[[2]]
 }
+# Пустые значения заменяем на NA
+# возможно метод оченб плох
+system.time( uic_dt[uic_dt==""]<-NA)
 
+write.table(uic_dt[,c(1,5,6,7,8,9)],"./Election_analysis/uic_tab.csv", sep = ";", fileEncoding = "UTF-8")
 saveRDS(uic_dt, file = "./Election_analysis/uic_td.rds")
 
+street_empty_pattern <- paste0("[^,\\.\\d]*\\W*(",
+                               paste0(str_replace(uic_dt$house_number[1076], "\\.", "\\\\." ),")", collapse = ""))
+
+test <- stringr::str_remove_all(stringr::str_extract(stringr::str_to_lower(str_remove(uic_dt$adres[1076], uic_dt$suburb_name[1076])), street_empty_pattern),
+                                         stringr::str_replace(uic_dt$house_number[1076], "\\.", "\\\\." ))
+uic_dt$adres[1076]
+str_extract(str_to_lower(uic_dt$adres[1076]), "[^,\\.\\d]*\\W*(д\\. 62)")
+ifelse( str_remove(uic_dt$adres[1076], ifelse(is.na(uic_dt$suburb_name[1076]) == T, "", uic_dt$suburb_name[1076])))
+replace_string <- ifelse(is.na(uic_dt$suburb_name[1076]) == T, uic_dt$adres[1076], str_remove(uic_dt$adres[1076], uic_dt$suburb_name[1076]))
+str_extract(str_to_lower(replace_string), "[^,\\.\\d]*\\W*(д\\. 62)")
