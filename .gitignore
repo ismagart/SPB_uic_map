@@ -2,3 +2,4 @@ extract_uic.R
 *.rds
 test.csv
 .Rhistory
+*.xml
