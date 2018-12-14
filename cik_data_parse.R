@@ -22,13 +22,39 @@ web <- GET(spb_election_url)
 pre_table <- html_nodes(content(web), "table")[3]
 
 test_table <- html_nodes(pre_table, "table")
-# суммированя таблица по всем тикас
-summary_info <- html_table(test_table[7], fill = TRUE, trim = TRUE)
-View(summary_info)
-write_xml(test_table[7], "./Election_analysis/summary_dirty_table.xml")
-# сами резульаты по тикам
-tic_result <- html_table(test_table[8], fill = T)
+# суммированя таблица по всем тикам
+summary_pre_table <- test_table[7]
+# ВАЖНО, что модификация summary_pre_table влияет на оригинал
+# не ясно пока как изолировать их. вся проблема с особенностях xml как такового и семантики R
+# XML2 магия, убираем тег br и заменяем его 
+# ищем все теги br (на выходе получаем вектор)
+summary_pre_table %>%  
+  xml_find_all(".//br") %>% 
+  # добавляем новый тег <p> со значением \n
+  xml_add_sibling("p", "\n")
 
+summary_pre_table %>%  
+  xml_find_all(".//br") %>% 
+  xml_remove()
+
+# Значения абсолютные и процентные разделены пробелом
+summary_info <- html_table(summary_pre_table, fill = TRUE, trim = TRUE)
+View(summary_info)
+
+# сами резульаты по тикам
+tic_pre_table <- test_table[8]
+
+tic_pre_table %>%  
+  xml_find_all(".//br") %>% 
+  # добавляем новый тег <p> со значением \n
+  xml_add_sibling("p", "\n")
+
+tic_pre_table %>%  
+  xml_find_all(".//br") %>% 
+  xml_remove()
+
+tic_result <- html_table(tic_pre_table, fill = T)
+View(tic_result)
 # intermediate_obj <- test_table[7]
 # summary_pre_table <- intermediate_obj
 tracemem(test_table[7])
@@ -91,19 +117,12 @@ xml_name(test_table[7])
 x <- read_xml("<table><b/></table>")
 x
 xml_name(x)
-# XML2 магия, убираем тег br и заменяем его 
-# ищем все теги br (на выходе получаем вектор)
-summary_pre_table %>%  
-xml_find_all(".//br") %>% 
-  # добавляем новый тег <p> со значением \n
-  xml_add_sibling("p", "\n")
+
 
 xml_name(test_table[7])
 xml_name(summary_pre_table)  
 
-summary_pre_table %>%  
-  xml_find_all(".//br") %>% 
-  xml_remove()
+
 
 xml_name(test_table[7])
 xml_name(summary_pre_table)
